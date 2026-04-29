@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"from zenbot.core.multi_agent import create_multi_agent_app; print\\('OK'\\)\")",
+      "Bash(conda run *)",
+      "Bash(xargs grep *)"
+    ]
+  }
+}
