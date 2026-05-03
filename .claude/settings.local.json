@@ -3,7 +3,15 @@
     "allow": [
       "Bash(python -c \"from zenbot.core.multi_agent import create_multi_agent_app; print\\('OK'\\)\")",
       "Bash(conda run *)",
-      "Bash(xargs grep *)"
+      "Bash(xargs grep *)",
+      "Bash(grep -v \"^\\\\.$\")",
+      "Bash(grep -v \"^\\\\.\\\\.$\")",
+      "Bash(python -c ' *)",
+      "Bash(python -c \"from zenbot.core.multi_agent import create_multi_agent_app; print\\('import ok'\\)\")",
+      "Bash(python -c \"import ast; tree = ast.parse\\(open\\('zenbot/core/multi_agent.py', encoding='utf-8'\\).read\\(\\)\\); print\\('syntax ok'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('zenbot/core/multi_agent.py', encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('zenbot/core/context.py', encoding='utf-8'\\).read\\(\\)\\); print\\('both files syntax ok'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('zenbot/core/multi_agent.py', encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('zenbot/core/context.py', encoding='utf-8'\\).read\\(\\)\\); print\\('ok'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('zenbot/core/multi_agent.py', encoding='utf-8'\\).read\\(\\)\\); print\\('ok'\\)\")"
     ]
   }
 }

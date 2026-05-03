@@ -89,11 +89,8 @@ async def _run_turn(user_input: str, thread_id: str):
         "user_input": user_input,
         "route": "",
         "messages": [],
-        "tasks": [],
-        "stages": [],
-        "current_stage": [],
-        "worker_results": [],
-        "final_answer": ""
+        "summary": "",
+        "final_answer": "",
     }
 
     pending_resume = None   # 存放 interrupt 后用户的回复
@@ -121,7 +118,7 @@ async def _run_turn(user_input: str, thread_id: str):
                         yield ("log", text)
 
                     # 提取最终回复
-                    if node_name in ("chat_done", "aggregator"):
+                    if node_name == "multi_subgraph":
                         answer = (node_data or {}).get("final_answer", "")
                         if answer and answer != "__replan__":
                             yield ("assistant", answer)
@@ -175,7 +172,7 @@ async def _resume_turn(user_reply: str, thread_id: str):
                     if text:
                         yield ("log", text)
 
-                    if node_name in ("chat_done", "aggregator"):
+                    if node_name == "multi_subgraph":
                         answer = (node_data or {}).get("final_answer", "")
                         if answer and answer != "__replan__":
                             yield ("assistant", answer)
@@ -220,18 +217,10 @@ def _format_node_event(node_name: str, node_data: dict) -> str:
     elif node_name == "worker":
         return f"`{ts}` ⚙️ Worker 执行中..."
 
-    elif node_name == "aggregator":
+    elif node_name == "multi_subgraph":
         answer = (node_data or {}).get("final_answer", "")
         if answer and answer != "__replan__":
-            return f"`{ts}` ✅ Aggregator 汇总完成"
-
-    elif node_name == "chat_agent":
-        msgs = (node_data or {}).get("messages", [])
-        if msgs:
-            last = msgs[-1]
-            if hasattr(last, "tool_calls") and last.tool_calls:
-                names = [tc["name"] for tc in last.tool_calls]
-                return f"`{ts}` 🔧 调用工具：`{'`, `'.join(names)}`"
+            return f"`{ts}` ✅ Multi-Agent 汇总完成"
 
     return ""
 

@@ -203,15 +203,7 @@ async def async_main():
                         spinner.tool_msg = "Planner 拆解任务中..."
                     elif rnode == "worker":
                         spinner.tool_msg = "Workers 执行中..."
-                    elif rnode == "chat_agent":
-                        last_msg = rdata.get("messages", [None])[-1]
-                        if last_msg and hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
-                            for tc in last_msg.tool_calls:
-                                spinner.is_tool_calling = True
-                                spinner.tool_msg = f"唤醒内置工具 : {tc['name']}..."
-                                cprint(f"  *\033[38;5;51m Tool Call: \033[0m{tc['name']}")
-                                cprint('')
-                    elif rnode in ("aggregator", "chat_done"):
+                    elif rnode == "aggregator":
                         spinner.is_spinning = False
                         answer = rdata.get("final_answer", "")
                         if answer and answer != "__replan__":

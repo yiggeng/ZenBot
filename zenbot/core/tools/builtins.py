@@ -1,5 +1,7 @@
 from datetime import datetime
 from .base import zenbot_tool, ZenbotBaseTool
+import ast
+import operator
 import os
 import json
 import uuid
@@ -67,12 +69,45 @@ def calculator(expression: str) -> str:
     用于计算基础的数学表达式，例如: '3 * 5' 或 '100 / 4'。
     注意：参数 expression 必须是一个合法的 Python 数学表达式字符串。
     """
+    _SAFE_OPS = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.FloorDiv: operator.floordiv,
+        ast.Mod: operator.mod,
+        ast.Pow: operator.pow,
+        ast.USub: operator.neg,
+        ast.UAdd: operator.pos,
+    }
+
+    def _eval(node):
+        if isinstance(node, ast.Constant):
+            if not isinstance(node.value, (int, float)):
+                raise ValueError(f"不支持的常量类型: {type(node.value)}")
+            return node.value
+        if isinstance(node, ast.BinOp):
+            op_type = type(node.op)
+            if op_type not in _SAFE_OPS:
+                raise ValueError(f"不支持的运算符: {op_type.__name__}")
+            left = _eval(node.left)
+            right = _eval(node.right)
+            if op_type is ast.Pow and abs(right) > 100:
+                raise ValueError("指数过大，拒绝计算")
+            return _SAFE_OPS[op_type](left, right)
+        if isinstance(node, ast.UnaryOp):
+            op_type = type(node.op)
+            if op_type not in _SAFE_OPS:
+                raise ValueError(f"不支持的一元运算符: {op_type.__name__}")
+            return _SAFE_OPS[op_type](_eval(node.operand))
+        raise ValueError(f"不支持的表达式节点: {type(node).__name__}")
+
     try:
-        # 警告: eval 在真实的生产环境中存在注入风险！
-        # 这里仅为了搭建核心层做快速 Demo。未来在生产级扩展中，
-        # 应该替换为基于 AST 的安全解析器，或者更专业的数学库（如 numexpr）。
-        result = eval(expression, {"__builtins__": {}}, {})
+        tree = ast.parse(expression.strip(), mode="eval")
+        result = _eval(tree.body)
         return f"表达式 '{expression}' 的计算结果是: {result}"
+    except ZeroDivisionError:
+        return "计算出错：除数不能为零。"
     except Exception as e:
         return f"计算出错，请检查表达式格式。错误信息: {str(e)}"
 
