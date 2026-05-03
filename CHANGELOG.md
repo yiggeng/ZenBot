@@ -1,5 +1,78 @@
 # ZenBot 开发日志
 
+## 2026-05-03
+
+### Planner 优化：禁止分配"总结"类子任务
+- Planner prompt 新增强制规则：绝不要额外分配"总结"或"撰写最终报告"的子任务
+- 所有 Worker 聚焦于实际的信息获取和操作执行，汇总由 Aggregator 统一负责
+
+### Aggregator 全局反思与闭环重规划（`__replan__`）
+- Aggregator 全部阶段执行完毕后，执行全局反思：评估结果是否实质性完成了用户请求
+- 若判断执行计划跑偏或存在可挽救的失败，输出 `__replan__` 前缀的反思原因
+- 系统捕获该标记后，携带反思反馈强制跳回 Planner 重新制定计划
+- 形成 **出计划 → 并行执行 → 全局检阅反省 → OK 退出 / 方向不对则重做计划** 的闭环容错机制
+
+### 图结构升级：`aggregator_next` 动态路由
+- `aggregator_next` 条件边新增 `"planner"` 路径，配合 `__replan__` 标记实现回环
+- 完整路由逻辑：`__replan__` → planner（重规划）/ 有后续阶段 → stage_dispatch / 全部完成 → END
+
+### 文档同步
+- README.md 和 CLAUDE.md 更新：图结构、数据流、节点描述同步反映 `__replan__` 闭环机制
+- 移除 README.md 中未实现的"任务记忆"（task_patterns.md）相关描述
+
+---
+
+## 2026-05-02
+
+### 架构重构：统一 Single/Multi Agent 为单一多智能体图
+
+#### 核心变更：废弃独立 Chat Agent 路径
+- 删除 `router_node`（意图路由）和 `route_decision`（chat/multi 分流），所有请求统一走多智能体管线
+- 删除 `chat_agent_node`、`chat_tools_node`、`chat_should_continue`、`chat_done_node` 等 chat 专属节点
+- 闲聊由 Planner 直接通过 `direct_answer` 字段拦截，无需独立路径
+
+#### 核心变更：状态体系重构
+- `AgentState` + `MultiState` 合并为 `MainState`（主图持久化）+ `MultiAgentState`（子图临时状态）
+- `MainState` 仅保留 `messages`、`summary`、`user_input`、`final_answer`，存于 SQLite
+- `MultiAgentState` 包含 `tasks`、`stages`、`current_stage`、`worker_results`、`confidence` 等子图内部字段
+- 删除 `route` 字段和 `_merge_worker_results` 自定义 reducer（改用 `operator.add`）
+- 删除 `__RESET__` sentinel 机制
+
+#### 核心变更：记忆管理节点后置
+- 滑动窗口压缩从 `router_node` 入口移至独立的 `memory_manager_node`
+- 位于 `multi_subgraph` 之后、`END` 之前，对话结束后异步压缩，不阻塞路由判断
+
+#### 新功能：Worker 自我修复机制
+- `WorkerState` 新增 `initial_messages`、`retry_count`、`should_retry`、`tool_loop_count` 字段
+- 新增 `worker_collect_result` 节点：收集 worker 最终结果，处理 tool loop 截断兜底
+- 新增 `worker_judge_node` 节点：LLM 判断执行是否彻底失败，失败时自动重试（最多 3 次）
+- 调用过工具的 worker 跳过 judge 直接放行（大概率成功）
+- Worker 子图流程：`agent → tools → ... → collect → judge → END`（失败回 agent 重试）
+
+#### 新功能：工具调用轮数上限
+- 新增 `MAX_TOOL_LOOPS = 15`，Worker 工具调用超过上限时强制输出结果
+- 达到上限 -2 时追加催促消息，提醒 LLM 停止调用工具
+
+#### 新功能：Planner 置信度与 Approval 跳过
+- Planner 输出新增 `confidence` 字段（0~1 浮点数）
+- 单任务 + 高置信（≥0.7）时自动跳过 approval 审批，直接执行
+
+#### 安全加固：calculator 工具重写
+- 废弃 `eval()` 实现，改用 AST 白名单解析器
+- 仅支持 `+`、`-`、`*`、`/`、`//`、`%`、`**` 运算符，拒绝非常量类型和超大指数
+- 修复除零错误处理
+
+#### 入口适配
+- `entry/main.py`：删除 `chat_agent`、`chat_done` 节点渲染逻辑，统一由 `aggregator` 处理
+- `entry/webui.py`：`chat_done` / `aggregator` 判断统一改为 `multi_subgraph`，删除 `chat_agent` 工具调用展示
+- `_format_node_event` 简化，移除 chat 相关分支
+
+#### 清理
+- 删除 `agent.py`（旧单 Agent 入口，已废弃）
+- 删除 `_base_sys_prompt()` 函数（chat 路径专属 system prompt 构建）
+
+---
+
 ## 2026-04-29（本次重构）
 
 ### 架构重构：统一单/Multi Agent 为单一图
