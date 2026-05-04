@@ -11,7 +11,11 @@
       "Bash(python -c \"import ast; tree = ast.parse\\(open\\('zenbot/core/multi_agent.py', encoding='utf-8'\\).read\\(\\)\\); print\\('syntax ok'\\)\")",
       "Bash(python -c \"import ast; ast.parse\\(open\\('zenbot/core/multi_agent.py', encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('zenbot/core/context.py', encoding='utf-8'\\).read\\(\\)\\); print\\('both files syntax ok'\\)\")",
       "Bash(python -c \"import ast; ast.parse\\(open\\('zenbot/core/multi_agent.py', encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('zenbot/core/context.py', encoding='utf-8'\\).read\\(\\)\\); print\\('ok'\\)\")",
-      "Bash(python -c \"import ast; ast.parse\\(open\\('zenbot/core/multi_agent.py', encoding='utf-8'\\).read\\(\\)\\); print\\('ok'\\)\")"
+      "Bash(python -c \"import ast; ast.parse\\(open\\('zenbot/core/multi_agent.py', encoding='utf-8'\\).read\\(\\)\\); print\\('ok'\\)\")",
+      "Bash(python3)",
+      "Bash(python -c \"import zenbot.core.multi_agent\")",
+      "Bash(python -m py_compile d:/zyj/ZenBot/entry/main.py)",
+      "Bash(python -m py_compile d:/zyj/ZenBot/entry/webui.py)"
     ]
   }
 }

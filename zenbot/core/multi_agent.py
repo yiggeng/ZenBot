@@ -19,6 +19,7 @@ from .logger import audit_logger
 from .provider import get_provider
 from .skill_loader import load_dynamic_skills
 from .tools.builtins import BUILTIN_TOOLS
+from .tools.memory_utils import load_recent_memories, save_memory_to_disk
 
 
 # ─────────────────────────── Worker State ───────────────────────────
@@ -63,6 +64,37 @@ def create_multi_agent_app(
                     return content
         return "暂无记录"
 
+    def _load_memories() -> str:
+        return load_recent_memories(limit=10)
+
+    def _format_history(messages, max_turns=3) -> str:
+        """Format recent conversation turns into a readable string for the planner."""
+        if not messages:
+            return ""
+        from langchain_core.messages import HumanMessage, AIMessage
+        # Group into turns (Human + AI pairs)
+        turns = []
+        current = []
+        for msg in messages:
+            if isinstance(msg, HumanMessage):
+                if current:
+                    turns.append(current)
+                current = [msg]
+            elif isinstance(msg, AIMessage) and current:
+                current.append(msg)
+        if current:
+            turns.append(current)
+        # Take last N turns
+        recent = turns[-max_turns:]
+        lines = []
+        for turn in recent:
+            for msg in turn:
+                role = "用户" if isinstance(msg, HumanMessage) else "AI"
+                content = msg.content[:500] if msg.content else ""
+                if content:
+                    lines.append(f"[{role}] {content}")
+        return "\n".join(lines)
+
     # ─────────────── 记忆管理节点（后置，对话结束前执行）───────────────
     def memory_manager_node(state: MainState, config: RunnableConfig) -> dict:
         """滑动窗口压缩：在对话结束后异步压缩旧消息，不阻塞路由判断"""
@@ -70,24 +102,77 @@ def create_multi_agent_app(
         current_summary = state.get("summary", "")
         final_msgs, discarded_msgs = trim_context_messages(raw_messages, trigger_turns=40, keep_turns=10)
 
-        if not discarded_msgs:
-            return {}
+        result = {}
+        if discarded_msgs:
+            discarded_text = "\n".join([f"{m.type}: {m.content}" for m in discarded_msgs if m.content])
+            summary_prompt = (
+                f"你是一个负责维护 AI 工作台上下文的后台模块。\n\n"
+                f"【现有的交接文档】\n{current_summary if current_summary else '暂无记录'}\n\n"
+                f"【刚刚过去的旧对话】\n{discarded_text}\n\n"
+                f"任务：请仔细阅读旧对话，提取出当前的对话语境和任务进度。\n"
+                f"动作：将新进展与【现有的交接文档】进行无缝融合，输出一份最新的上下文摘要。\n"
+                f"严格警告：只记录'我们在聊什么'、'解决了什么问题'、'得出了什么结论'等。绝对不要记录用户的静态偏好(如姓名、职业、爱好等)，这部分由其他模块负责！\n"
+                f"要求：客观、精简，不要输出任何解释性废话，直接返回最新的记忆文本，总字数不要超过150字"
+            )
+            new_summary = llm.invoke([HumanMessage(content=summary_prompt)], config={"callbacks": []})
+            result = {
+                "summary": new_summary.content,
+                "messages": [RemoveMessage(id=m.id) for m in discarded_msgs if m.id],
+            }
 
-        discarded_text = "\n".join([f"{m.type}: {m.content}" for m in discarded_msgs if m.content])
-        summary_prompt = (
-            f"你是一个负责维护 AI 工作台上下文的后台模块。\n\n"
-            f"【现有的交接文档】\n{current_summary if current_summary else '暂无记录'}\n\n"
-            f"【刚刚过去的旧对话】\n{discarded_text}\n\n"
-            f"任务：请仔细阅读旧对话，提取出当前的对话语境和任务进度。\n"
-            f"动作：将新进展与【现有的交接文档】进行无缝融合，输出一份最新的上下文摘要。\n"
-            f"严格警告：只记录'我们在聊什么'、'解决了什么问题'、'得出了什么结论'等。绝对不要记录用户的静态偏好(如姓名、职业、爱好等)，这部分由其他模块负责！\n"
-            f"要求：客观、精简，不要输出任何解释性废话，直接返回最新的记忆文本，总字数不要超过150字"
-        )
-        new_summary = llm.invoke([HumanMessage(content=summary_prompt)], config={"callbacks": []})
-        return {
-            "summary": new_summary.content,
-            "messages": [RemoveMessage(id=m.id) for m in discarded_msgs if m.id],
-        }
+        # ── 自动记忆提取 ──
+        recent_human = None
+        recent_ai = None
+        for msg in reversed(raw_messages):
+            if isinstance(msg, AIMessage) and msg.content and recent_ai is None:
+                recent_ai = msg
+            elif isinstance(msg, HumanMessage) and msg.content and recent_human is None:
+                recent_human = msg
+            if recent_human and recent_ai:
+                break
+
+        if recent_human and recent_ai:
+            extraction_prompt = (
+                f"你是一个记忆提取模块。分析以下对话，判断是否有值得长期保存的信息。\n\n"
+                f"【用户说】\n{recent_human.content}\n\n"
+                f"【AI 回复】\n{recent_ai.content}\n\n"
+                f"提取规则：\n"
+                f"1. 只提取事实性、持久性的信息（用户偏好、决策、项目信息、技术方案等）\n"
+                f"2. 不要提取临时信息（时间查询结果、一次性计算、闲聊寒暄）\n"
+                f"3. 不要提取 user_profile 已有的信息（姓名、称呼等）\n"
+                f"4. 不要提取对话流程信息（如'用户让我搜索了XX'）\n\n"
+                f"如果值得保存，输出 JSON：\n"
+                f'{{"save": true, "content": "简洁的记忆内容（1-3句）", "category": "fact/preference/decision/project/technical/general", "keywords": "逗号分隔关键词"}}\n'
+                f'如果没有值得保存的信息：\n'
+                f'{{"save": false}}'
+            )
+            try:
+                extraction_result = llm.invoke(
+                    [HumanMessage(content=extraction_prompt)],
+                    config={"callbacks": []}
+                )
+                raw = extraction_result.content.strip()
+                if "```" in raw:
+                    raw = raw.split("```")[1]
+                    if raw.startswith("json"):
+                        raw = raw[4:]
+                    raw = raw.strip()
+                else:
+                    import re
+                    m = re.search(r'\{.*\}', raw, re.DOTALL)
+                    if m:
+                        raw = m.group()
+                parsed = json.loads(raw)
+                if parsed.get("save"):
+                    save_memory_to_disk(
+                        content=parsed["content"],
+                        category=parsed.get("category", "general"),
+                        keywords=parsed.get("keywords", ""),
+                    )
+            except Exception:
+                pass
+
+        return result
 
     # ─────────────── Worker 子图节点 ───────────────
     def worker_agent_node(state: WorkerState, config: RunnableConfig) -> dict:
@@ -257,11 +342,20 @@ def create_multi_agent_app(
 
     def planner_node(state: MultiAgentState, config: RunnableConfig) -> dict:
         _thread_id = config.get("configurable", {}).get("thread_id", "zenbot_main")
-        profile = _load_profile()
+        profile = state.get("profile") or _load_profile()
+        memories = state.get("memories") or _load_memories()
         skills_section = ""
         if dynamic_skill_names:
             skills_list = "\n".join([f"- {n}" for n in dynamic_skill_names])
             skills_section = f"\n已加载的扩展技能（worker 可以使用）：\n{skills_list}\n"
+
+        memories_section = ""
+        if memories:
+            memories_section = f"\n【长期记忆】以下是你之前记住的重要信息，规划任务时可参考：\n{memories}\n"
+
+        history_section = ""
+        if state.get("history"):
+            history_section = f"【最近对话历史】以下是前几轮的对话内容，用户可能会引用其中的信息：\n{state['history']}\n"
 
         prompt = (
             f"你是任务规划器。将用户请求拆解为独立执行的子任务。\n"
@@ -274,7 +368,9 @@ def create_multi_agent_app(
             f"只在子任务明确需要某技能时才提及技能。\n"
             f"【时间基准】当前系统时间为：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}，如果你看到如“明天”、“下周”等时间词，请以此系统时间为基准推算日期直接分配在子任务描述里。\n"
             f"{skills_section}"
-            f"用户画像：{profile}\n\n"
+            f"用户画像：{profile}\n"
+            f"{memories_section}\n"
+            f"{history_section}\n"
             f"只输出 JSON 对象，格式如下：\n"
             f'{{"confidence": 1.0, "tasks": [], "direct_answer": "你好！有什么我可以帮你的？"}}\n'
             f'或：{{"confidence": 0.9, "tasks": [{{"id": 1, "desc": "...", "depends_on": []}}]}}\n\n'
@@ -360,11 +456,17 @@ def create_multi_agent_app(
         return {"current_stage": current, "stages": remaining}
 
     def dispatch_current_stage(state: MultiAgentState) -> List[Send]:
-        profile = _load_profile()
+        profile = state.get("profile") or _load_profile()
+        memories = state.get("memories") or _load_memories()
         skills_section = ""
         if dynamic_skill_names:
             skills_list = "\n".join([f"- {n}" for n in dynamic_skill_names])
             skills_section = f"\n【当前已加载的扩展技能】\n{skills_list}\n使用技能时先 mode='help' 读说明书。\n"
+
+        memories_section = ""
+        if memories:
+            memories_section = f"\n【长期记忆】你之前记住的信息（可参考，也可用 search_memory 工具搜索更多）：\n{memories}\n"
+
         sys_prompt = (
             f"你是 ZenBot 的专注执行单元，负责完成分配给你的子任务。\n"
             f"【时间基准】当前系统时间为：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
@@ -373,7 +475,7 @@ def create_multi_agent_app(
             "【重要】如使用搜索引擎，只要能获取满足当前任务所需的基础核心信息即可，请立即停止继续搜索或调用工具，并直接输出结果。切勿过度搜索细节或无穷验证。如果查一次就已经能知道当前情况，就直接回复。\n"
             "【文件生成限制】除非任务描述中明确指令“写文件”、“保存为文档”，否则绝对禁止调用任何工具创建、写入或修改文件，直接在聊天中以纯文本回复结果。\n"
             "完成后给出简洁结果摘要，所有文件操作限制在 office 目录内。\n"
-            f"{skills_section}\n用户画像：{profile}"
+            f"{skills_section}\n用户画像：{profile}\n{memories_section}"
         )
         prev_results = list(state.get("worker_results") or [])
         return [
@@ -445,7 +547,12 @@ def create_multi_agent_app(
             f"以下是各独立子任务的执行结果：\n{combined}\n\n"
             f"你需要评估当前收集到的结果是否实质性地完成了用户的原始请求。\n"
             f"1. 如果已经成功完成，或者是由于超出能力/客观条件无法完成，请整合成完整连贯的回复直接回答用户。\n"
-            f"2. 如果发现是因为先前的【执行计划有误】或方向不对导致任务失败，但你觉得换个方向或使用其他工具还有希望完成，请你输出：__replan__：[说明为什么失败以及应该怎么调整计划]"
+            f"2. 如果发现是因为先前的【执行计划有误】或方向不对导致任务失败，但你觉得换个方向或使用其他工具还有希望完成，请你输出：__replan__：[说明为什么失败以及应该怎么调整计划]\n"
+            f"\n"
+            f"【重要】你的回复会被存入对话历史，后续对话中用户可能会引用你提到的内容。因此：\n"
+            f"- 列举选项/方向/方案时，必须保留每个选项的名称和核心定义（不要只列编号）\n"
+            f"- 关键数据、结论、专有名词必须保留，不要过度压缩\n"
+            f"- 宁可稍长也不要丢失用户后续可能引用的细节"
         )
         response = llm.invoke([HumanMessage(content=prompt)])
         content = response.content.strip()
@@ -509,6 +616,9 @@ def create_multi_agent_app(
             "worker_results": [],
             "final_answer": "",
             "confidence": 0.0,
+            "history": _format_history(state.get("messages") or []),
+            "profile": _load_profile(),
+            "memories": _load_memories(),
         }
         # 子图同步执行（invoke），内部 interrupt 会向上传播
         sub_result = compiled_multi.invoke(sub_input, config)

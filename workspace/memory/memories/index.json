@@ -1,0 +1,55 @@
+[
+  {
+    "id": "886e",
+    "file": "20260504_164758_886e.md",
+    "timestamp": "2026-05-04 16:47:58",
+    "category": "project",
+    "keywords": [
+      "研究生小论文",
+      "agent研究",
+      "导师指导"
+    ],
+    "summary": "用户是研究生，正在构思关于agent的小论文方向，研究主题由导师指定。"
+  },
+  {
+    "id": "3f18",
+    "file": "20260504_165340_3f18.md",
+    "timestamp": "2026-05-04 16:53:40",
+    "category": "project",
+    "keywords": [
+      "多智能体协作",
+      "LLM",
+      "论文",
+      "MetaGPT",
+      "AutoGen",
+      "通信机制"
+    ],
+    "summary": "用户正在研究'多智能体协作与通信'方向，并收集了相关论文，包括MetaGPT、AutoGen等核心框架和最新综述。"
+  },
+  {
+    "id": "b4c0",
+    "file": "20260504_173311_b4c0.md",
+    "timestamp": "2026-05-04 17:33:11",
+    "category": "preference",
+    "keywords": [
+      "agent memory",
+      "论文写作",
+      "研究方向"
+    ],
+    "summary": "用户对agent memory方向感兴趣，并计划研究如何撰写相关论文。"
+  },
+  {
+    "id": "044f",
+    "file": "20260504_182129_044f.md",
+    "timestamp": "2026-05-04 18:21:29",
+    "category": "technical",
+    "keywords": [
+      "Agent评测",
+      "评测维度",
+      "基准测试",
+      "自动化评估",
+      "实施流程"
+    ],
+    "summary": "Agent评测需覆盖任务完成、准确性、效率、安全与对齐等维度，采用基准测试（如GAIA、SWE-bench）和自动化评估方法，并遵循明确目标、选择评测集、搭建环"
+  }
+]

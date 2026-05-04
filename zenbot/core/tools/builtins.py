@@ -7,6 +7,12 @@ import json
 import uuid
 import threading
 from ..config import MEMORY_DIR, TASKS_FILE
+from .memory_utils import (
+    save_memory_to_disk,
+    search_memories_on_disk,
+    list_memories_on_disk,
+    delete_memory_on_disk,
+)
 from .sandbox_tools import (
     list_office_files,
     read_office_file,
@@ -334,6 +340,55 @@ def web_search(query: str) -> str:
         return f"搜索出错：{str(e)}"
 
 
+@zenbot_tool
+def save_memory(content: str, category: str = "general", keywords: str = "") -> str:
+    """
+    保存一条长期记忆。
+    当用户明确说"记住这个"、"以后记得"、"帮我记一下"时，或者你认为当前对话中产生了值得长期保存的重要信息时，调用此工具。
+
+    参数说明：
+    - content: 需要记住的核心内容，简洁明了，1-3句话。
+    - category: 分类标签。可选值：fact（事实）、preference（偏好）、decision（决策）、project（项目）、technical（技术）、general（通用）。
+    - keywords: 逗号分隔的关键词，用于后续检索。例如："python,docker,部署"
+
+    注意事项：
+    - 不要保存临时性信息（如"现在几点"的回答）
+    - 不要保存与 user_profile 中重复的信息（姓名、称呼等由 save_user_profile 负责）
+    - 每条记忆应聚焦一个主题，不要把多个不相关的事情塞进一条记忆
+    """
+    return save_memory_to_disk(content, category, keywords)
+
+
+@zenbot_tool
+def search_memory(query: str, max_results: int = 5) -> str:
+    """
+    搜索长期记忆库。
+    当你需要回忆之前讨论过的事情、用户提到过的偏好、做过的决策时，调用此工具。
+    参数 query 是搜索关键词或短语，支持空格分隔的多个关键词（AND 逻辑）。
+    """
+    return search_memories_on_disk(query, max_results)
+
+
+@zenbot_tool
+def list_memories(category: str = "", limit: int = 20) -> str:
+    """
+    列出所有长期记忆。
+    当用户问"你记住了什么"、"你有哪些记忆"、"帮我看看之前记的东西"时调用此工具。
+    可选参数 category 按分类筛选（fact/preference/decision/project/technical/general）。
+    """
+    return list_memories_on_disk(category, limit)
+
+
+@zenbot_tool
+def delete_memory(memory_id: str) -> str:
+    """
+    删除一条长期记忆。
+    当用户说"删除那条记忆"、"忘掉这个"等明确要求清除记忆时调用此工具。
+    先用 list_memories 或 search_memory 确认要删除的记忆 ID。
+    """
+    return delete_memory_on_disk(memory_id)
+
+
 BUILTIN_TOOLS = [
     get_current_time,
     calculator,
@@ -347,5 +402,9 @@ BUILTIN_TOOLS = [
     list_scheduled_tasks,
     delete_scheduled_task,
     modify_scheduled_task,
-    web_search
+    web_search,
+    save_memory,
+    search_memory,
+    list_memories,
+    delete_memory,
 ]

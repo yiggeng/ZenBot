@@ -49,6 +49,7 @@ START → multi_subgraph(planner → approval → workers → aggregator) → me
 | [zenbot/core/provider.py](zenbot/core/provider.py) | LLM factory — maps provider name to LangChain chat model |
 | [zenbot/core/skill_loader.py](zenbot/core/skill_loader.py) | Loads skill packages from `workspace/office/skills/` at startup |
 | [zenbot/core/tools/builtins.py](zenbot/core/tools/builtins.py) | All built-in tools (web search, file I/O, scheduler, etc.) |
+| [zenbot/core/tools/memory_utils.py](zenbot/core/tools/memory_utils.py) | Long-term memory storage, search, and prompt injection |
 | [zenbot/core/tools/sandbox_tools.py](zenbot/core/tools/sandbox_tools.py) | Sandboxed shell/file execution (restricted to `office/`) |
 | [zenbot/core/logger.py](zenbot/core/logger.py) | JSONL audit logging per thread |
 | [entry/cli.py](entry/cli.py) | Typer CLI entry points |

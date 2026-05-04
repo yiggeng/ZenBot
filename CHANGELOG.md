@@ -1,5 +1,32 @@
 # ZenBot 开发日志
 
+## 2026-05-04
+
+### 代码清理与优化
+
+#### 遗留字段清理
+- `entry/main.py`：inputs 初始化移除已废弃的 `route` 字段，补充缺失的 `summary` 字段，与 `MainState` 定义对齐
+- `entry/webui.py`：同上，移除 `route` 字段
+- `entry/webui.py`：删除重复的 `HumanMessage, AIMessage` import
+- `entry/main.py` + `entry/webui.py`：删除 `_format_node_event` / `_handle_node` 中对已废弃 `router` 节点的死代码处理
+
+#### 性能优化：profile/memories 单次加载
+- `MultiAgentState` 新增 `profile` 和 `memories` 字段
+- `multi_subgraph_node` 入口处一次性加载用户画像和长期记忆，通过 state 传递给下游节点
+- `planner_node` 和 `dispatch_current_stage` 优先从 state 读取，避免同一轮对话重复读两次磁盘
+
+#### 性能优化：记忆搜索预筛选
+- `search_memories_on_disk` 改为两阶段搜索：先用 index 中的 keywords + summary 做无 I/O 粗筛，仅对命中的条目读取全文精确打分
+- 记忆量大时避免全量读文件，显著降低磁盘 I/O
+
+#### 健壮性：记忆提取 JSON 解析
+- `memory_manager_node` 的自动记忆提取 JSON 解析逻辑增强：code fence 模式之外新增正则 `\{.*\}` 兜底，LLM 输出带额外说明文字时不再解析失败
+
+### 文档同步
+- README.md MultiAgentState 表格补充 `profile` 和 `memories` 字段
+
+---
+
 ## 2026-05-03
 
 ### Planner 优化：禁止分配"总结"类子任务
@@ -19,6 +46,22 @@
 ### 文档同步
 - README.md 和 CLAUDE.md 更新：图结构、数据流、节点描述同步反映 `__replan__` 闭环机制
 - 移除 README.md 中未实现的"任务记忆"（task_patterns.md）相关描述
+
+### 长期记忆功能
+- 新增 `zenbot/core/tools/memory_utils.py`：长期记忆数据层（存储、检索、索引）
+- 存储结构：`workspace/memory/memories/` 下每条记忆独立 `.md` 文件 + `index.json` 元数据索引
+- 新增 4 个内置工具：`save_memory`、`search_memory`、`list_memories`、`delete_memory`
+- `memory_manager_node` 新增自动记忆提取：每轮对话结束后 LLM 判断是否值得保存，静默失败不影响主流程
+- Planner 和 Worker 启动时注入最近 10 条长期记忆到 system prompt
+- `MultiAgentState` 新增 `history` 字段，`multi_subgraph_node` 将最近 3 轮对话格式化后传入子图
+
+### Bug 修复：Planner 跨轮失忆
+- 根因：`history_section` 变量定义误放在 `aggregator_node` 内，planner_node 引用时未定义导致 NameError
+- 修复：将 `history_section` 定义移至 `planner_node` 内（`memories_section` 之后、`prompt` 之前）
+- 效果：planner 每轮都能看到前 3 轮对话内容，用户引用上一轮信息时不再"失忆"
+
+### 文档补充
+- 新增 `docs/node_prompts.md`：各关键节点 LLM 调用详解（planner、worker、judge、aggregator、memory_manager 的完整 prompt 模板和数据来源）
 
 ---
 

@@ -22,7 +22,6 @@ load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 from zenbot.core.config import DB_PATH
 from zenbot.core.multi_agent import create_multi_agent_app
-from langchain_core.messages import HumanMessage, AIMessage
 
 # ─────────────── 全局状态 ───────────────
 
@@ -87,7 +86,6 @@ async def _run_turn(user_input: str, thread_id: str):
     config = {"configurable": {"thread_id": thread_id}}
     inputs = {
         "user_input": user_input,
-        "route": "",
         "messages": [],
         "summary": "",
         "final_answer": "",
@@ -203,12 +201,7 @@ def _format_node_event(node_name: str, node_data: dict) -> str:
         return ""
     ts = datetime.now().strftime("%H:%M:%S")
 
-    if node_name == "router":
-        route = (node_data or {}).get("route", "")
-        if route:
-            return f"`{ts}` 🔀 意图路由 → **{route}**"
-
-    elif node_name == "planner":
+    if node_name == "planner":
         tasks = (node_data or {}).get("tasks", [])
         if tasks:
             lines = "\n".join([f"  #{t['id']} {t['desc'][:50]}" for t in tasks])

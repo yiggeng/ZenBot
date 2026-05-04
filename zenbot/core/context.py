@@ -21,6 +21,9 @@ class MultiAgentState(TypedDict):
     worker_results: Annotated[List[str], operator.add]  # 并行 worker 追加合并
     final_answer: str
     confidence: float       # planner 输出的置信度，用于 approval 节点判断是否跳过
+    history: str            # 最近几轮对话历史（从 MainState.messages 格式化后传入）
+    profile: str            # 用户画像（入口加载一次，下游节点复用）
+    memories: str           # 长期记忆摘要（入口加载一次，下游节点复用）
 
 
 def trim_context_messages(

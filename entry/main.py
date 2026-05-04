@@ -167,9 +167,8 @@ async def async_main():
                 spinner.is_tool_calling = False
 
                 inputs = {
-                    "user_input": user_input, "route": "", "messages": [],
-                    "tasks": [], "stages": [], "current_stage": [],
-                    "worker_results": [], "final_answer": ""
+                    "user_input": user_input, "messages": [],
+                    "summary": "", "final_answer": ""
                 }
 
                 async def _handle_interrupt(iv: dict):
@@ -196,10 +195,7 @@ async def async_main():
                 def _handle_node(rnode, rdata):
                     if rdata is None:
                         return
-                    if rnode == "router":
-                        if rdata.get("route") == "multi":
-                            spinner.tool_msg = "Planner 分析任务中..."
-                    elif rnode == "planner":
+                    if rnode == "planner":
                         spinner.tool_msg = "Planner 拆解任务中..."
                     elif rnode == "worker":
                         spinner.tool_msg = "Workers 执行中..."

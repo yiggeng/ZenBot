@@ -1,6 +1,6 @@
 # ZenBot
 
-> 最后更新：2026-05-03
+> 最后更新：2026-05-04
 
 ## 项目定位
 
@@ -32,7 +32,10 @@ ZenBot/
 ├── workspace/
 │   ├── state.sqlite3      # LangGraph checkpointer（所有会话的 messages + summary）
 │   ├── memory/
-│   │   └── user_profile.md    # 用户长期画像（姓名、职业、偏好等）
+│   │   ├── user_profile.md    # 用户长期画像（姓名、职业、偏好等）
+│   │   └── memories/          # 长期记忆条目（自动提取 + 手动保存）
+│   │       ├── index.json     # 元数据索引（加速 list/search）
+│   │       └── *.md           # 单条记忆文件
 │   └── office/            # 沙盒工作区（agent 只能读写此目录）
 │       └── skills/        # 动态技能包目录
 └── logs/
@@ -43,15 +46,18 @@ ZenBot/
 
 ## 记忆体系
 
-ZenBot 有两层记忆机制：
+ZenBot 有三层记忆机制：
 
 
-| 层级     | 存储位置                           | 持久性     | 用途                                       |
-| -------- | ---------------------------------- | ---------- | ------------------------------------------ |
-| 短期记忆 | `workspace/state.sqlite3`          | 跨重启保留 | 对话历史、上下文摘要（滑动窗口压缩）       |
-| 用户画像 | `workspace/memory/user_profile.md` | 永久       | 用户偏好、静态信息（LLM 主动调用工具保存） |
+| 层级     | 存储位置                           | 持久性     | 用途                                            |
+| -------- | ---------------------------------- | ---------- | ----------------------------------------------- |
+| 短期记忆 | `workspace/state.sqlite3`          | 跨重启保留 | 对话历史、上下文摘要（滑动窗口压缩）            |
+| 用户画像 | `workspace/memory/user_profile.md` | 永久       | 用户偏好、静态信息（LLM 主动调用工具保存）      |
+| 长期记忆 | `workspace/memory/memories/*.md`   | 永久       | 事实、决策、项目上下文等（自动提取 + 手动保存） |
 
 - **用户画像**：agent 通过 `save_user_profile` 工具更新，planner/worker 启动时自动注入 system prompt
+- **长期记忆**：每条记忆为独立 markdown 文件，存于 `memories/` 子目录，元数据索引 `index.json` 加速检索。支持 `save_memory`（手动保存）、`search_memory`（关键词搜索）、`list_memories`（列出全部）、`delete_memory`（删除）。`memory_manager_node` 每轮对话结束后自动判断是否值得保存。planner/worker 启动时加载最近 10 条注入 prompt。
+- **对话历史传递**：`multi_subgraph_node` 将最近 3 轮对话格式化后传入 MultiAgentState，planner 每轮都能看到前几轮的对话内容，避免跨轮"失忆"
 - **对话摘要**：≥40 轮时触发压缩，保留最新 10 轮，摘要注入 prompt
 
 ---
@@ -84,6 +90,8 @@ ZenBot 有两层记忆机制：
 | `worker_results` | `List[str]`        | `operator.add` | 所有 worker 的产出（并行追加合并）           |
 | `final_answer`   | `str`              | 覆盖           | 汇总回复；`"__replan__"` 触发重新规划        |
 | `confidence`     | `float`            | 覆盖           | planner 输出的置信度，用于 approval 跳过判断 |
+| `profile`        | `str`              | 覆盖           | 用户画像（入口加载一次，planner/worker 复用） |
+| `memories`       | `str`              | 覆盖           | 长期记忆摘要（入口加载一次，planner/worker 复用） |
 
 ### WorkerState（Worker 子图状态，不持久化）
 
@@ -206,6 +214,10 @@ START → agent → tools → agent → ... → collect → judge → END
 | `list_scheduled_tasks`  | 查看所有待执行的定时任务                     |
 | `delete_scheduled_task` | 取消指定定时任务                             |
 | `modify_scheduled_task` | 修改定时任务的时间或内容                     |
+| `save_memory`           | 保存一条长期记忆（内容、分类、关键词）       |
+| `search_memory`         | 关键词搜索长期记忆                           |
+| `list_memories`         | 列出长期记忆条目                             |
+| `delete_memory`         | 删除指定长期记忆                             |
 
 ### 动态技能（Skills）
 
