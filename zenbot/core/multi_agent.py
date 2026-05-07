@@ -19,7 +19,7 @@ from .logger import audit_logger
 from .provider import get_provider
 from .skill_loader import load_dynamic_skills
 from .tools.builtins import BUILTIN_TOOLS
-from .tools.memory_utils import load_recent_memories, save_memory_to_disk
+from .tools.memory_utils import save_memory_to_disk
 
 
 # ─────────────────────────── Worker State ───────────────────────────
@@ -63,9 +63,6 @@ def create_multi_agent_app(
                 if content:
                     return content
         return "暂无记录"
-
-    def _load_memories() -> str:
-        return load_recent_memories(limit=10)
 
     def _format_history(messages, max_turns=3) -> str:
         """Format recent conversation turns into a readable string for the planner."""
@@ -343,15 +340,10 @@ def create_multi_agent_app(
     def planner_node(state: MultiAgentState, config: RunnableConfig) -> dict:
         _thread_id = config.get("configurable", {}).get("thread_id", "zenbot_main")
         profile = state.get("profile") or _load_profile()
-        memories = state.get("memories") or _load_memories()
         skills_section = ""
         if dynamic_skill_names:
             skills_list = "\n".join([f"- {n}" for n in dynamic_skill_names])
             skills_section = f"\n已加载的扩展技能（worker 可以使用）：\n{skills_list}\n"
-
-        memories_section = ""
-        if memories:
-            memories_section = f"\n【长期记忆】以下是你之前记住的重要信息，规划任务时可参考：\n{memories}\n"
 
         history_section = ""
         if state.get("history"):
@@ -369,7 +361,7 @@ def create_multi_agent_app(
             f"【时间基准】当前系统时间为：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}，如果你看到如“明天”、“下周”等时间词，请以此系统时间为基准推算日期直接分配在子任务描述里。\n"
             f"{skills_section}"
             f"用户画像：{profile}\n"
-            f"{memories_section}\n"
+            f"【长期记忆能力】你有长期记忆能力，如果用户请求涉及之前的偏好、历史信息等，可在子任务描述中注明需要使用 search_memory 工具检索相关记忆。\n"
             f"{history_section}\n"
             f"只输出 JSON 对象，格式如下：\n"
             f'{{"confidence": 1.0, "tasks": [], "direct_answer": "你好！有什么我可以帮你的？"}}\n'
@@ -457,15 +449,10 @@ def create_multi_agent_app(
 
     def dispatch_current_stage(state: MultiAgentState) -> List[Send]:
         profile = state.get("profile") or _load_profile()
-        memories = state.get("memories") or _load_memories()
         skills_section = ""
         if dynamic_skill_names:
             skills_list = "\n".join([f"- {n}" for n in dynamic_skill_names])
             skills_section = f"\n【当前已加载的扩展技能】\n{skills_list}\n使用技能时先 mode='help' 读说明书。\n"
-
-        memories_section = ""
-        if memories:
-            memories_section = f"\n【长期记忆】你之前记住的信息（可参考，也可用 search_memory 工具搜索更多）：\n{memories}\n"
 
         sys_prompt = (
             f"你是 ZenBot 的专注执行单元，负责完成分配给你的子任务。\n"
@@ -475,7 +462,8 @@ def create_multi_agent_app(
             "【重要】如使用搜索引擎，只要能获取满足当前任务所需的基础核心信息即可，请立即停止继续搜索或调用工具，并直接输出结果。切勿过度搜索细节或无穷验证。如果查一次就已经能知道当前情况，就直接回复。\n"
             "【文件生成限制】除非任务描述中明确指令“写文件”、“保存为文档”，否则绝对禁止调用任何工具创建、写入或修改文件，直接在聊天中以纯文本回复结果。\n"
             "完成后给出简洁结果摘要，所有文件操作限制在 office 目录内。\n"
-            f"{skills_section}\n用户画像：{profile}\n{memories_section}"
+            f"你可以使用 search_memory 工具按需检索长期记忆和用户偏好。\n"
+            f"{skills_section}\n用户画像：{profile}\n"
         )
         prev_results = list(state.get("worker_results") or [])
         return [
@@ -618,7 +606,6 @@ def create_multi_agent_app(
             "confidence": 0.0,
             "history": _format_history(state.get("messages") or []),
             "profile": _load_profile(),
-            "memories": _load_memories(),
         }
         # 子图同步执行（invoke），内部 interrupt 会向上传播
         sub_result = compiled_multi.invoke(sub_input, config)

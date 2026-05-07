@@ -15,7 +15,12 @@
       "Bash(python3)",
       "Bash(python -c \"import zenbot.core.multi_agent\")",
       "Bash(python -m py_compile d:/zyj/ZenBot/entry/main.py)",
-      "Bash(python -m py_compile d:/zyj/ZenBot/entry/webui.py)"
+      "Bash(python -m py_compile d:/zyj/ZenBot/entry/webui.py)",
+      "WebSearch",
+      "WebFetch(domain:arxiv.org)",
+      "WebFetch(domain:scholar.google.com)",
+      "WebFetch(domain:www.semanticscholar.org)",
+      "Bash(pip install:*)"
     ]
   }
 }

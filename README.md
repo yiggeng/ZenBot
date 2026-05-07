@@ -1,6 +1,6 @@
 # ZenBot
 
-> 最后更新：2026-05-04
+> 最后更新：2026-05-07
 
 ## 项目定位
 
@@ -56,7 +56,7 @@ ZenBot 有三层记忆机制：
 | 长期记忆 | `workspace/memory/memories/*.md`   | 永久       | 事实、决策、项目上下文等（自动提取 + 手动保存） |
 
 - **用户画像**：agent 通过 `save_user_profile` 工具更新，planner/worker 启动时自动注入 system prompt
-- **长期记忆**：每条记忆为独立 markdown 文件，存于 `memories/` 子目录，元数据索引 `index.json` 加速检索。支持 `save_memory`（手动保存）、`search_memory`（关键词搜索）、`list_memories`（列出全部）、`delete_memory`（删除）。`memory_manager_node` 每轮对话结束后自动判断是否值得保存。planner/worker 启动时加载最近 10 条注入 prompt。
+- **长期记忆**：每条记忆为独立 markdown 文件，存于 `memories/` 子目录，元数据索引 `index.json` 加速检索。支持 `save_memory`（手动保存）、`search_memory`（关键词搜索）、`list_memories`（列出全部）、`delete_memory`（删除）。`memory_manager_node` 每轮对话结束后自动判断是否值得保存。planner/worker 不再全量预加载记忆，改为 worker 按需通过 `search_memory` 工具检索。
 - **对话历史传递**：`multi_subgraph_node` 将最近 3 轮对话格式化后传入 MultiAgentState，planner 每轮都能看到前几轮的对话内容，避免跨轮"失忆"
 - **对话摘要**：≥40 轮时触发压缩，保留最新 10 轮，摘要注入 prompt
 
@@ -90,8 +90,7 @@ ZenBot 有三层记忆机制：
 | `worker_results` | `List[str]`        | `operator.add` | 所有 worker 的产出（并行追加合并）           |
 | `final_answer`   | `str`              | 覆盖           | 汇总回复；`"__replan__"` 触发重新规划        |
 | `confidence`     | `float`            | 覆盖           | planner 输出的置信度，用于 approval 跳过判断 |
-| `profile`        | `str`              | 覆盖           | 用户画像（入口加载一次，planner/worker 复用） |
-| `memories`       | `str`              | 覆盖           | 长期记忆摘要（入口加载一次，planner/worker 复用） |
+| `profile`        | `str`              | 覆盖           | 用户画像（入口加载一次，planner/worker 复用；长期记忆改为按需检索） |
 
 ### WorkerState（Worker 子图状态，不持久化）
 
@@ -302,6 +301,36 @@ TAVILY_API_KEY=tvly-xxxxx
 ```
 
 支持的 Provider：`openai`、`anthropic`、`aliyun`、`tencent`、`z.ai`、`ollama` 及任意 OpenAI 兼容端点。
+
+### LangSmith 监控
+
+在 `.env` 中添加以下配置，即可自动上报所有 LLM 调用和 Graph 执行链路到 [LangSmith](https://smith.langchain.com)：
+
+```
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=your-langsmith-api-key
+LANGCHAIN_PROJECT=ZenBot
+```
+
+零代码改动，LangChain/LangGraph 通过环境变量自动挂载 tracing callback。不需要追踪的调用可在 config 中传入 `{"callbacks": []}` 跳过。
+
+### LangGraph Studio
+
+[LangGraph Studio](https://github.com/langchain-ai/langgraph-studio) 提供 Graph 可视化调试，支持单步执行、查看节点状态流转。
+
+```bash
+# 安装（首次）
+pip install "langgraph-cli[inmem]"
+
+# 启动 API Server（默认 http://localhost:2024）
+langgraph dev
+```
+
+启动后在 Studio 中填入 Base URL `http://localhost:2024` 即可连接。
+
+相关文件：
+- `studio_graph.py` — Studio 入口模块
+- `langgraph.json` — Studio 配置（graph 路径、依赖、环境变量）
 
 ### CLI 命令
 

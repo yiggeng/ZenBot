@@ -1,5 +1,30 @@
 # ZenBot 开发日志
 
+## 2026-05-07
+
+### 优化：长期记忆按需加载，移除全量注入
+- 移除 `multi_subgraph_node` 中每次请求全量加载最近 10 条长期记忆到 state 的逻辑
+- 移除 `planner_node` 和 `dispatch_current_stage` prompt 中的全量记忆注入
+- Worker 保留 `search_memory` 工具，按需检索相关记忆，减少无关记忆干扰 LLM 输出
+- 保留用户画像注入（体积小，提供基础个性化上下文）
+- 效果：每次请求减少大量 token 消耗，简单请求（天气、闲聊）不再加载无关记忆
+
+### LangSmith 监控集成
+- `.env` 新增 `LANGCHAIN_TRACING_V2`、`LANGCHAIN_API_KEY`、`LANGCHAIN_PROJECT` 配置
+- 零代码接入：LangChain/LangGraph 自动挂载 callback，所有 `llm.invoke()` 和 `graph.invoke()` / `graph.astream()` 调用自动上报
+- `.env.example` 同步更新
+
+### LangGraph Studio 可视化调试
+- 新增 `studio_graph.py`：Studio 入口模块，暴露编译好的 graph 供 Studio 连接
+- 新增 `langgraph.json`：Studio 配置文件，定义 graph 路径和依赖
+- 安装 `langgraph-cli[inmem]`：Studio 所需的 API Server 运行时
+- 启动方式：`langgraph dev` → Studio 连接 `http://localhost:2024`
+
+### Bug 修复：Windows GBK 编码
+- `.env` 文件移除中文注释，避免 python-dotenv 在 Windows GBK locale 下 `UnicodeDecodeError`
+
+---
+
 ## 2026-05-04
 
 ### 代码清理与优化
