@@ -1,5 +1,25 @@
 # ZenBot 开发日志
 
+## 2026-05-11
+
+### Deep Research 可用性修复
+- **Bug 修复：`verify_facts` 节点崩溃导致报告无法生成**
+  - Qwen 等 LLM 常把 `verification_sources` 返回为 `[{"name": ..., "description": ...}, ...]`，但 `FactVerification` schema 原本强制 `List[str]`，pydantic 校验失败整个子图中断在 `verify_facts`，`final_answer` 始终为空
+  - `zenbot/core/deep_research/schemas.py`：放宽为 `List[Union[str, Dict[str, str]]]`，兼容两种返回形态
+  - `zenbot/core/deep_research/graph.py::verify_facts_node`：对 dict 项归一化为 `"{name} - {description}"` 字符串，下游 `', '.join(...)` 拼接报告不再抛错
+
+### Deep Research 报告自动落盘
+- `zenbot/core/config.py` 新增 `REPORTS_DIR = workspace/reports/`，首次启动自动创建
+- `finalize_answer_node` 在输出 `final_answer` 的同时调用 `_save_report()` 写 Markdown，文件名 `{YYYYMMDD_HHMMSS}_{thread_id}_{topic_slug}.md`，包含主题、时间、会话 ID、完整正文与参考来源列表
+- `final_answer` 末尾附 `> 报告已保存至 {path}`，CLI/WebUI 打印时用户直接可见路径
+
+### WebUI 会话下拉丢失历史会话修复
+- **Bug**：Deep Research 模式下子图从未调用 `audit_logger.log_event(...)`，`logs/*.jsonl` 没有对应文件，但 WebUI 的 `_list_sessions` 只扫 `logs/`，导致重启后该会话在下拉列表里消失（SQLite checkpointer 里其实还完整保留）
+- **修复**：`entry/webui.py::_list_sessions` 改为优先查询 `state.sqlite3` 的 `checkpoints.thread_id`，`logs/*.jsonl` 作为补集合并去重；会话历史以 checkpointer 为真相来源
+- Deep Research 子图 `generate_query_node` / `finalize_answer_node` 补 `audit_logger.log_event(...)` 埋点，Monitor 面板从第一条查询起就有实时反馈
+
+---
+
 ## 2026-05-07
 
 ### 优化：长期记忆按需加载，移除全量注入

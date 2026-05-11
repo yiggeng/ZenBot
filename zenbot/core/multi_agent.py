@@ -15,6 +15,7 @@ from langgraph.types import Send, interrupt
 
 from .config import MEMORY_DIR
 from .context import MainState, MultiAgentState, trim_context_messages
+from .deep_research.graph import create_deep_research_subgraph
 from .logger import audit_logger
 from .provider import get_provider
 from .skill_loader import load_dynamic_skills
@@ -593,6 +594,9 @@ def create_multi_agent_app(
 
     compiled_multi = multi_graph.compile()
 
+    # ─────────────── Deep Research 子图 ───────────────
+    compiled_deep_research = create_deep_research_subgraph()
+
     # ─────────────── 多智能体子图适配节点（MainState <-> MultiAgentState）───────────────
     def multi_subgraph_node(state: MainState, config: RunnableConfig) -> dict:
         """调用多智能体子图，将结果冒泡回主图 messages"""
@@ -618,13 +622,54 @@ def create_multi_agent_app(
             ]
         return updates
 
+    # ─────────────── Deep Research 子图适配节点 ───────────────
+    async def deep_research_subgraph_node(state: MainState, config: RunnableConfig) -> dict:
+        """调用 Deep Research 子图，将结果冒泡回主图 messages"""
+        sub_input = {
+            "messages": [],
+            "user_input": state["user_input"],
+            "search_query": [],
+            "web_research_result": [],
+            "sources_gathered": [],
+            "initial_search_query_count": 3,
+            "max_research_loops": 2,
+            "research_loop_count": 0,
+            "generated_queries": [],
+            "content_quality": {},
+            "fact_verification": {},
+            "relevance_assessment": {},
+            "summary_optimization": {},
+            "quality_enhanced_summary": "",
+            "verification_report": "",
+            "final_confidence_score": 0.0,
+            "final_answer": "",
+        }
+        sub_result = await compiled_deep_research.ainvoke(sub_input, config)
+        answer = sub_result.get("final_answer", "")
+        updates: dict = {"final_answer": answer}
+        if answer:
+            updates["messages"] = [
+                HumanMessage(content=state["user_input"]),
+                AIMessage(content=answer),
+            ]
+        return updates
+
+    # ─────────────── 模式路由 ───────────────
+    def route_by_mode(state: MainState) -> str:
+        mode = state.get("mode", "")
+        if mode == "deep_research":
+            return "deep_research_subgraph"
+        return "multi_subgraph"
+
     # ─────────────── 构建主图 ───────────────
     main_graph = StateGraph(MainState)
     main_graph.add_node("multi_subgraph", multi_subgraph_node)
+    main_graph.add_node("deep_research_subgraph", deep_research_subgraph_node)
     main_graph.add_node("memory_manager", memory_manager_node)
 
-    main_graph.add_edge(START, "multi_subgraph")
+    main_graph.add_conditional_edges(START, route_by_mode, ["multi_subgraph", "deep_research_subgraph"])
     main_graph.add_edge("multi_subgraph", "memory_manager")
+    main_graph.add_edge("deep_research_subgraph", "memory_manager")
     main_graph.add_edge("memory_manager", END)
 
     app = main_graph.compile(checkpointer=checkpointer)

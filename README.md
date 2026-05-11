@@ -1,10 +1,10 @@
 # ZenBot
 
-> 最后更新：2026-05-07
+> 最后更新：2026-05-11
 
 ## 项目定位
 
-ZenBot 是一个基于 **LangGraph** 构建的本地 AI 助手，支持命令行（CLI）和 Web UI 两种运行方式。所有请求统一走多智能体管线：planner 拆解任务并评估置信度，worker 并行执行，aggregator 汇总结果。
+ZenBot 是一个基于 **LangGraph** 构建的本地 AI 助手，支持命令行（CLI）和 Web UI 两种运行方式。请求会按 `mode` 路由：默认走 `multi_agent` 管线（planner 拆解 → workers 并行 → aggregator 汇总）；切换到 `deep_research` 时进入深度研究子图（查询生成 → 联网研究 → 反思循环 → 质量验证 → 报告输出）。
 
 ---
 
@@ -16,6 +16,7 @@ ZenBot/
 │   ├── config.py          # 路径常量（DB_PATH、MEMORY_DIR、OFFICE_DIR 等）
 │   ├── context.py         # MainState / MultiAgentState / WorkerState 定义
 │   ├── multi_agent.py     # 主图工厂：multi_subgraph → memory_manager
+│   ├── deep_research/     # Deep Research 子图（查询、反思、验证、报告）
 │   ├── provider.py        # 多模型适配（Aliyun / OpenAI / Anthropic / Ollama 等）
 │   ├── skill_loader.py    # 动态加载 office/skills/ 下的技能包
 │   ├── heartbeat.py       # 后台心跳（定时任务触发器）
@@ -36,8 +37,9 @@ ZenBot/
 │   │   └── memories/          # 长期记忆条目（自动提取 + 手动保存）
 │   │       ├── index.json     # 元数据索引（加速 list/search）
 │   │       └── *.md           # 单条记忆文件
-│   └── office/            # 沙盒工作区（agent 只能读写此目录）
-│       └── skills/        # 动态技能包目录
+│   ├── office/            # 沙盒工作区（agent 只能读写此目录）
+│   │   └── skills/        # 动态技能包目录
+│   └── reports/           # Deep Research 报告输出目录（自动落盘）
 └── logs/
     └── {thread_id}.jsonl  # 审计日志（每个会话独立文件）
 ```
@@ -75,6 +77,7 @@ ZenBot 有三层记忆机制：
 | `summary`      | `str`               | 覆盖           | 滑动窗口压缩后的上下文摘要（≤150字） |
 | `user_input`   | `str`               | 覆盖           | 本轮用户原始输入                      |
 | `final_answer` | `str`               | 覆盖           | 最终回复内容                          |
+| `mode`         | `str`               | 覆盖           | 路由模式：`multi_agent` / `deep_research` |
 
 ### MultiAgentState（多智能体子图内部状态，不持久化）
 
@@ -116,10 +119,12 @@ ZenBot 有三层记忆机制：
 ### 主图（MainState）
 
 ```
-START → multi_subgraph → memory_manager → END
+START → route_by_mode → (multi_subgraph / deep_research_subgraph) → memory_manager → END
 ```
 
+- **route_by_mode**：按 `MainState.mode` 选择执行路径
 - **multi_subgraph**：调用多智能体子图，结果冒泡回 MainState
+- **deep_research_subgraph**：调用 Deep Research 子图，产出研究报告型答案
 - **memory_manager**：滑动窗口压缩（≥40轮触发，保留最新10轮）
 
 ### 多智能体子图（MultiAgentState）
@@ -135,6 +140,20 @@ START → planner → approval → stage_dispatch → workers → aggregator →
 - **stage_dispatch**：拓扑排序，弹出当前阶段
 - **workers**：通过 Send API 并行执行
 - **aggregator**：汇总所有 worker 结果。单子任务时优先原单透传；还有后续阶段则继续流转。全部完成后，aggregator 执行**全局反思**——如果判断执行计划跑偏或存在可挽救的失败，输出 `__replan__` 前缀的反思原因，系统会携带反馈强制跳回 planner 重新制定计划，形成闭环容错。
+
+### 深度研究子图（DeepResearchState）
+
+```
+START → generate_query → web_research* → reflection
+                                   ↘ (不足) web_research* 循环
+reflection(充分/达上限) → assess_content_quality → verify_facts → assess_relevance
+→ optimize_summary → generate_verification_report → finalize_answer → END
+```
+
+- `web_research*`：通过 Tavily 并行检索并生成带引用摘要
+- `reflection`：判断信息是否充分；不足时生成 follow-up 查询继续循环（受 `max_research_loops` 限制）
+- 质量管线：内容质量、事实验证、相关性评估、摘要优化
+- `finalize_answer`：拼装最终结果并自动保存 Markdown 报告到 `workspace/reports/`
 
 ### Worker 子图（WorkerState）
 
@@ -154,7 +173,12 @@ START → agent → tools → agent → ... → collect → judge → END
 
 ```
 用户输入
-  └─► multi_subgraph_node
+  └─► route_by_mode
+        ├─ mode=multi_agent ─► multi_subgraph_node
+        └─ mode=deep_research ─► deep_research_subgraph_node
+                                      └─ generate_query → web_research* → reflection* → 质量管线 → finalize_answer
+                                            └─ 报告自动落盘：workspace/reports/{YYYYMMDD_HHMMSS}_{thread_id}_{topic_slug}.md
+  └─►（multi_agent 路径）multi_subgraph_node
         └─► planner_node
               └─ LLM 输出 JSON 任务列表（含 depends_on）和置信度（confidence）
         └─► approval_node
@@ -338,6 +362,7 @@ langgraph dev
 | 命令           | 效果                                   |
 | -------------- | -------------------------------------- |
 | `/new`         | 开启新会话，历史隔离                   |
+| `/deep`        | 切换 `multi_agent` / `deep_research` 模式 |
 | `/exit`        | 退出程序，状态持久化                   |
 | `y`            | Planner 审批阶段确认执行               |
 | `n`            | Planner 审批阶段拒绝，触发改进建议收集 |

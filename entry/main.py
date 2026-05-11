@@ -64,7 +64,7 @@ def print_banner():
 
     tip = (
         f"{PURPLE} * {RESET}"
-        f"{SILVER}{PURPLE}{BOLD}ZenBot{RESET} 已完成启动。输入命令开始，输入 {PURPLE}/exit{RESET}{SILVER} 退出，{PURPLE}/new{RESET}{SILVER} 开启新会话。{RESET}\n"
+        f"{SILVER}{PURPLE}{BOLD}ZenBot{RESET} 已完成启动。输入命令开始，输入 {PURPLE}/exit{RESET}{SILVER} 退出，{PURPLE}/new{RESET}{SILVER} 新会话，{PURPLE}/deep{RESET}{SILVER} 切换深度研究。{RESET}\n"
     )
 
     print(logo)
@@ -99,26 +99,27 @@ async def async_main():
 
         class SpinnerState:
             action_words = [
-                "Thinking...",              
-                "Working...",               
-                "Beep boop...",             
-                "Eating bugs...",           
-                "Charging battery...",      
-                "Brewing coffee...",        
-                "Blinking lights...",       
-                "Polishing pixels...",      
-                "Scanning matrix...",       
-                "Warming up circuits...",   
-                "Syncing data...",          
-                "Pinging server..."         
+                "Thinking...",
+                "Working...",
+                "Beep boop...",
+                "Eating bugs...",
+                "Charging battery...",
+                "Brewing coffee...",
+                "Blinking lights...",
+                "Polishing pixels...",
+                "Scanning matrix...",
+                "Warming up circuits...",
+                "Syncing data...",
+                "Pinging server..."
             ]
-            current_words = [] 
+            current_words = []
             is_spinning = False
             start_time = 0
             frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
             is_tool_calling = False
             tool_msg = ""
             awaiting_confirm = False  # 是否正在等待用户确认 Planner 方案
+            mode = "multi_agent"  # "multi_agent" or "deep_research"
 
         spinner = SpinnerState()
 
@@ -160,6 +161,16 @@ async def async_main():
                     task_queue.task_done()
                     continue
 
+                if user_input.lower() == "/deep":
+                    if spinner.mode == "deep_research":
+                        spinner.mode = "multi_agent"
+                        cprint(f"  \033[38;5;141m* 已切换到 ⚡ 标准模式\033[0m\n")
+                    else:
+                        spinner.mode = "deep_research"
+                        cprint(f"  \033[38;5;141m* 已切换到 🔬 深度研究模式\033[0m\n")
+                    task_queue.task_done()
+                    continue
+
                 spinner.current_words = spinner.action_words.copy()
                 random.shuffle(spinner.current_words)
                 spinner.start_time = time.time()
@@ -168,12 +179,18 @@ async def async_main():
 
                 inputs = {
                     "user_input": user_input, "messages": [],
-                    "summary": "", "final_answer": ""
+                    "summary": "", "final_answer": "",
+                    "mode": spinner.mode,
                 }
 
                 async def _handle_interrupt(iv: dict):
                     itype = iv.get("type", "plan_approval")
-                    if itype == "plan_approval":
+                    if itype == "query_confirmation":
+                        query_list = iv.get("query_list", "")
+                        cprint(f"\n  \033[38;5;51m🔬 Deep Research 生成了以下搜索查询：\033[0m")
+                        cprint(f"\033[38;5;242m{query_list}\033[0m")
+                        cprint(f"\n  \033[38;5;250m确认执行？(y/修改后的查询)\033[0m ")
+                    elif itype == "plan_approval":
                         plan_text = iv.get("plan", "")
                         task_count = iv.get("task_count", 0)
                         mode_label = iv.get("mode", "并行")
@@ -203,6 +220,16 @@ async def async_main():
                         spinner.is_spinning = False
                         answer = rdata.get("final_answer", "")
                         if answer and answer != "__replan__":
+                            lines = answer.strip().split('\n')
+                            formatted_out = f"  \033[38;5;141m>\033[0m \033[38;5;250m{lines[0]}"
+                            for line in lines[1:]:
+                                formatted_out += f"\n    {line}"
+                            formatted_out += "\033[0m"
+                            cprint(formatted_out)
+                    elif rnode == "deep_research_subgraph":
+                        spinner.is_spinning = False
+                        answer = rdata.get("final_answer", "")
+                        if answer:
                             lines = answer.strip().split('\n')
                             formatted_out = f"  \033[38;5;141m>\033[0m \033[38;5;250m{lines[0]}"
                             for line in lines[1:]:

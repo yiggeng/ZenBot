@@ -10,6 +10,7 @@ class MainState(TypedDict):
     summary: str
     user_input: str
     final_answer: str
+    mode: str  # "multi_agent" (default) or "deep_research"
 
 
 class MultiAgentState(TypedDict):
@@ -22,6 +23,7 @@ class MultiAgentState(TypedDict):
     final_answer: str
     confidence: float       # planner 输出的置信度，用于 approval 节点判断是否跳过
     history: str            # 最近几轮对话历史（从 MainState.messages 格式化后传入）
+    profile: str            # 用户画像（从 user_profile.md 加载）
 
 
 def trim_context_messages(

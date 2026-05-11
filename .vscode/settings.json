@@ -1,7 +1,15 @@
 {
     "python-envs.defaultEnvManager": "ms-python.python:conda",
     "python-envs.defaultPackageManager": "ms-python.python:conda",
+    "claudeCode.selectedModel": "claude-3-5-sonnet-latest",
     "claudeCode.environmentVariables": [
-        
+        {
+            "name": "ANTHROPIC_BASE_URL",
+            "value": "https://xiaoma.best"
+        },
+        {
+            "name": "ANTHROPIC_AUTH_TOKEN",
+            "value": "sk-fbXeefEV9aXyXt3gl1PPIoaNQblvvl4x4ZasTMTDJTuAUiQ2"
+        }
     ]
 }

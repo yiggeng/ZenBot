@@ -77,7 +77,7 @@ async def _load_chat_history(thread_id: str) -> list:
             history.append({"role": "assistant", "content": str(msg.content)})
     return history
 
-async def _run_turn(user_input: str, thread_id: str):
+async def _run_turn(user_input: str, thread_id: str, mode: str = "multi_agent"):
     """
     驱动一轮对话，yield (role, content) 流式输出。
     role: "assistant" | "approval" | "log"
@@ -89,6 +89,7 @@ async def _run_turn(user_input: str, thread_id: str):
         "messages": [],
         "summary": "",
         "final_answer": "",
+        "mode": mode,
     }
 
     pending_resume = None   # 存放 interrupt 后用户的回复
@@ -116,19 +117,26 @@ async def _run_turn(user_input: str, thread_id: str):
                         yield ("log", text)
 
                     # 提取最终回复
-                    if node_name == "multi_subgraph":
+                    if node_name in ("multi_subgraph", "deep_research_subgraph"):
                         answer = (node_data or {}).get("final_answer", "")
                         if answer and answer != "__replan__":
                             yield ("assistant", answer)
 
         if got_interrupt:
-            # 把审批方案发给 UI，等待用户回复
-            plan_text = interrupt_val.get("plan", "")
-            task_count = interrupt_val.get("task_count", 0)
-            mode_label = interrupt_val.get("mode", "并行")
-            itype = interrupt_val.get("type", "plan_approval")
+            itype = interrupt_val.get("type", "")
 
-            if itype == "plan_approval":
+            if itype == "query_confirmation":
+                # Deep Research 查询确认
+                query_list = interrupt_val.get("query_list", "")
+                approval_msg = (
+                    f"**🔬 Deep Research 生成了以下搜索查询：**\n\n"
+                    f"```\n{query_list}\n```\n\n"
+                    f"确认执行？输入 **y** 确认，或提供修改后的查询（每行一个）"
+                )
+            elif itype == "plan_approval":
+                plan_text = interrupt_val.get("plan", "")
+                task_count = interrupt_val.get("task_count", 0)
+                mode_label = interrupt_val.get("mode", "并行")
                 label = "重新拆解出" if interrupt_val.get("replan") else "拆解出"
                 approval_msg = (
                     f"**✦ Planner {label} {task_count} 个{mode_label}子任务：**\n\n"
@@ -170,17 +178,25 @@ async def _resume_turn(user_reply: str, thread_id: str):
                     if text:
                         yield ("log", text)
 
-                    if node_name == "multi_subgraph":
+                    if node_name in ("multi_subgraph", "deep_research_subgraph"):
                         answer = (node_data or {}).get("final_answer", "")
                         if answer and answer != "__replan__":
                             yield ("assistant", answer)
 
         if got_interrupt:
-            plan_text = interrupt_val.get("plan", "")
-            task_count = interrupt_val.get("task_count", 0)
-            mode_label = interrupt_val.get("mode", "并行")
-            itype = interrupt_val.get("type", "plan_approval")
-            if itype == "plan_approval":
+            itype = interrupt_val.get("type", "")
+
+            if itype == "query_confirmation":
+                query_list = interrupt_val.get("query_list", "")
+                approval_msg = (
+                    f"**🔬 Deep Research 生成了以下搜索查询：**\n\n"
+                    f"```\n{query_list}\n```\n\n"
+                    f"确认执行？输入 **y** 确认，或提供修改后的查询（每行一个）"
+                )
+            elif itype == "plan_approval":
+                plan_text = interrupt_val.get("plan", "")
+                task_count = interrupt_val.get("task_count", 0)
+                mode_label = interrupt_val.get("mode", "并行")
                 label = "重新拆解出" if interrupt_val.get("replan") else "拆解出"
                 approval_msg = (
                     f"**✦ Planner {label} {task_count} 个{mode_label}子任务：**\n\n"
@@ -214,6 +230,11 @@ def _format_node_event(node_name: str, node_data: dict) -> str:
         answer = (node_data or {}).get("final_answer", "")
         if answer and answer != "__replan__":
             return f"`{ts}` ✅ Multi-Agent 汇总完成"
+
+    elif node_name == "deep_research_subgraph":
+        answer = (node_data or {}).get("final_answer", "")
+        if answer:
+            return f"`{ts}` ✅ Deep Research 完成"
 
     return ""
 
@@ -308,6 +329,12 @@ def build_ui():
         with gr.Row():
             # ── 左侧：对话 ──
             with gr.Column(scale=3):
+                mode_selector = gr.Dropdown(
+                    label="对话模式",
+                    choices=[("⚡ 标准模式", "multi_agent"), ("🔬 深度研究", "deep_research")],
+                    value="multi_agent",
+                    interactive=True,
+                )
                 chatbox = gr.Chatbot(
                     label="对话",
                     elem_id="chatbox",
@@ -352,7 +379,7 @@ def build_ui():
 
         # ─────────────── 事件处理 ───────────────
 
-        def handle_send(message: str, history: list, thread_id: str, is_approval: bool):
+        def handle_send(message: str, history: list, thread_id: str, is_approval: bool, mode: str):
             """处理用户发送消息"""
             if not message.strip():
                 yield history, "", thread_id, is_approval, _read_recent_logs(thread_id)
@@ -368,7 +395,7 @@ def build_ui():
             if is_approval:
                 events = _collect_async_gen(_resume_turn(message, thread_id))
             else:
-                events = _collect_async_gen(_run_turn(message, thread_id))
+                events = _collect_async_gen(_run_turn(message, thread_id, mode))
 
             new_approval = False
             for role, content in events:
@@ -391,13 +418,39 @@ def build_ui():
             yield history, "", thread_id, new_approval, _read_recent_logs(thread_id)
 
         def _list_sessions() -> list:
-            """扫描 logs/ 目录，返回所有 .jsonl 文件对应的 thread_id 列表（按修改时间倒序）"""
+            """合并 SQLite checkpointer 与 logs/*.jsonl 两处来源，返回去重后的 thread_id 列表（最近活跃优先）。"""
+            # 1) SQLite 是会话真相来源 —— Deep Research 等子图可能没写 jsonl，但一定有 checkpoint
+            sqlite_sessions: list[tuple[str, float]] = []
+            try:
+                import sqlite3
+                conn = sqlite3.connect(DB_PATH)
+                rows = conn.execute(
+                    "SELECT thread_id, MAX(checkpoint_id) FROM checkpoints GROUP BY thread_id"
+                ).fetchall()
+                conn.close()
+                # checkpoint_id 形如 '1f0bxxxx-...-<uuid>'，字典序≈时间序（UUID v1 前缀）
+                sqlite_sessions = [(tid, cid or "") for tid, cid in rows]
+            except Exception:
+                pass
+
+            # 2) logs/*.jsonl 作为补集（例如刚创建但还没产生 checkpoint 的新会话）
             log_dir = os.path.join(PROJECT_ROOT, "logs")
-            if not os.path.exists(log_dir):
-                return ["zenbot_main"]
-            files = [f for f in os.listdir(log_dir) if f.endswith(".jsonl")]
-            files.sort(key=lambda f: os.path.getmtime(os.path.join(log_dir, f)), reverse=True)
-            sessions = [f[:-6] for f in files]  # 去掉 .jsonl 后缀
+            log_sessions: list[tuple[str, float]] = []
+            if os.path.exists(log_dir):
+                for f in os.listdir(log_dir):
+                    if f.endswith(".jsonl"):
+                        tid = f[:-6]
+                        mtime = os.path.getmtime(os.path.join(log_dir, f))
+                        log_sessions.append((tid, str(mtime)))
+
+            # 合并：SQLite 优先；排序用"最近活跃"混合指标
+            seen: dict[str, str] = {}
+            for tid, key in sqlite_sessions:
+                seen[tid] = key
+            for tid, key in log_sessions:
+                seen.setdefault(tid, key)
+
+            sessions = sorted(seen.keys(), key=lambda t: seen[t], reverse=True)
             return sessions if sessions else ["zenbot_main"]
 
         def handle_new_session(history: list):
@@ -472,7 +525,7 @@ def build_ui():
         # ── 绑定事件 ──
         user_input.submit(
             fn=handle_send,
-            inputs=[user_input, chatbox, thread_id_state, awaiting_approval],
+            inputs=[user_input, chatbox, thread_id_state, awaiting_approval, mode_selector],
             outputs=[chatbox, user_input, thread_id_state, awaiting_approval, monitor_box],
         )
 
